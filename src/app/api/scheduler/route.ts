@@ -5,6 +5,11 @@ import { getDueReminders } from '@/lib/schedulerRunner'
 import { groupNotifications } from '@/lib/notificationGrouping'
 import { determineNotificationTarget } from '@/lib/notificationRouter'
 import { sendIphoneNotification } from '@/lib/notificationSender'
+import {
+  createOccurrenceKey,
+  hasNotificationEvent,
+  createNotificationEvent,
+} from '@/lib/notificationIdempotency'
 
 export async function GET() {
   try {
@@ -21,22 +26,31 @@ export async function GET() {
 
       return NextResponse.json(
         { error: 'Failed to load reminders' },
-        { status: 500 }
+        { status: 500 },
       )
     }
 
     const reminders = data.map(mapReminder)
 
     const currentTime = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Almaty',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
+      timeZone: 'Asia/Almaty',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
     }).format(new Date())
+
+    const now = new Date()
+
+    const date = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Almaty',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now)
 
     const dueReminders = getDueReminders(
       reminders,
-      currentTime
+      currentTime,
     )
 
     if (dueReminders.length === 0) {
@@ -47,32 +61,71 @@ export async function GET() {
     }
 
     const groups = groupNotifications(
-      dueReminders
+      dueReminders,
     )
 
-    const target =
-      await determineNotificationTarget()
+    const target = await determineNotificationTarget()
 
     const results = []
 
     for (const group of groups) {
+      const reminderIds = group.reminders.map(
+        (reminder) => reminder.id,
+      )
+
+      const occurrenceKey = createOccurrenceKey(
+        date,
+        group.scheduledTime,
+        reminderIds,
+      )
+
+      const alreadyProcessed =
+        await hasNotificationEvent(occurrenceKey)
+
+      if (alreadyProcessed) {
+        results.push({
+          scheduledTime: group.scheduledTime,
+          reminders: group.reminders.map(
+            (reminder) => reminder.name,
+          ),
+          skipped: true,
+          reason: 'already_processed',
+        })
+
+        continue
+      }
+
       if (target === 'iphone') {
         const result =
           await sendIphoneNotification(group)
 
+        await createNotificationEvent(
+          occurrenceKey,
+          reminderIds,
+          `${date}T${group.scheduledTime}:00`,
+          target,
+        )
+
         results.push({
           scheduledTime: group.scheduledTime,
           reminders: group.reminders.map(
-            (reminder) => reminder.name
+            (reminder) => reminder.name,
           ),
           target,
           ...result,
         })
       } else {
+        await createNotificationEvent(
+          occurrenceKey,
+          reminderIds,
+          `${date}T${group.scheduledTime}:00`,
+          target,
+        )
+
         results.push({
           scheduledTime: group.scheduledTime,
           reminders: group.reminders.map(
-            (reminder) => reminder.name
+            (reminder) => reminder.name,
           ),
           target,
         })
@@ -89,7 +142,7 @@ export async function GET() {
 
     return NextResponse.json(
       { error: 'Scheduler failed' },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }
