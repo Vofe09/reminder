@@ -1,91 +1,51 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import ReminderCard from '@/components/ReminderCard'
 import {
-  getPushStatus,
-  registerPush,
-} from '@/lib/pushClient'
+  createReminder,
+  deleteReminder,
+  disableReminder,
+  enableReminder,
+  getReminders,
+  updateReminder,
+} from '@/lib/api/reminders'
+import { Reminder } from '@/types/reminder'
 
-type Status = {
-  supported: boolean
-  subscribed: boolean
+type FormData = {
+  name: string
+  startTime: string
+  endTime: string
+  interval: string
+}
+
+const emptyForm: FormData = {
+  name: '',
+  startTime: '09:00',
+  endTime: '22:00',
+  interval: '20',
 }
 
 export default function Home() {
-  const [status, setStatus] = useState<Status>({
-    supported: false,
-    subscribed: false,
-  })
+  const [reminders, setReminders] = useState<Reminder[]>([])
+  const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const [message, setMessage] = useState('Checking...')
-  const [loading, setLoading] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [editingReminder, setEditingReminder] = useState<Reminder | null>(null)
+  const [formData, setFormData] = useState<FormData>(emptyForm)
 
-  async function refreshStatus() {
+  async function loadReminders() {
     try {
-      const result = await getPushStatus()
-
-      setStatus(result)
-
-      if (!result.supported) {
-        setMessage('Web Push is not supported')
-      } else if (result.subscribed) {
-        setMessage('iPhone notifications are registered')
-      } else {
-        setMessage('iPhone notifications are not registered')
-      }
+      setError(null)
+      const data = await getReminders()
+      setReminders(data)
     } catch (error) {
-      setMessage(
+      setError(
         error instanceof Error
           ? error.message
-          : 'Failed to check status'
-      )
-    }
-  }
-
-  async function handleRegisterPush() {
-    setLoading(true)
-    setMessage('Registering...')
-
-    try {
-      await registerPush()
-
-      setMessage('Push notifications registered successfully')
-
-      await refreshStatus()
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : 'Failed to register push'
-      )
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleTestNotification() {
-    setLoading(true)
-    setMessage('Sending test notification...')
-
-    try {
-      const response = await fetch('/api/push/test', {
-        method: 'POST',
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error ?? 'Failed to send notification')
-      }
-
-      setMessage(
-        `Notification sent. Sent: ${data.sent}, removed: ${data.removed}`
-      )
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : 'Failed to send notification'
+          : 'Failed to load reminders'
       )
     } finally {
       setLoading(false)
@@ -93,72 +53,309 @@ export default function Home() {
   }
 
   useEffect(() => {
-    refreshStatus()
+    loadReminders()
   }, [])
 
+  function openCreateForm() {
+    setEditingReminder(null)
+    setFormData(emptyForm)
+    setShowForm(true)
+  }
+
+  function openEditForm(reminder: Reminder) {
+    setEditingReminder(reminder)
+
+    setFormData({
+      name: reminder.name,
+      startTime: reminder.startTime,
+      endTime: reminder.endTime,
+      interval: String(reminder.interval),
+    })
+
+    setShowForm(true)
+  }
+
+  function closeForm() {
+    setShowForm(false)
+    setEditingReminder(null)
+    setFormData(emptyForm)
+  }
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
+
+    const interval = Number(formData.interval)
+
+    if (!formData.name.trim()) {
+      setError('Name is required')
+      return
+    }
+
+    if (!Number.isInteger(interval) || interval < 1) {
+      setError('Interval must be at least 1 minute')
+      return
+    }
+
+    if (formData.endTime < formData.startTime) {
+      setError('End time cannot be earlier than start time')
+      return
+    }
+
+    try {
+      setError(null)
+
+      const data = {
+        name: formData.name.trim(),
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        interval,
+      }
+
+      if (editingReminder) {
+        const updated = await updateReminder(
+          editingReminder.id,
+          data
+        )
+
+        setReminders((current) =>
+          current.map((reminder) =>
+            reminder.id === updated.id ? updated : reminder
+          )
+        )
+      } else {
+        const created = await createReminder(data)
+        setReminders((current) => [...current, created])
+      }
+
+      closeForm()
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to save reminder'
+      )
+    }
+  }
+
+  async function handleToggle(reminder: Reminder) {
+    try {
+      setActionLoading(reminder.id)
+      setError(null)
+
+      const updated = reminder.enabled
+        ? await disableReminder(reminder.id)
+        : await enableReminder(reminder.id)
+
+      setReminders((current) =>
+        current.map((item) =>
+          item.id === updated.id ? updated : item
+        )
+      )
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to update reminder'
+      )
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  async function handleDelete(reminder: Reminder) {
+    const confirmed = window.confirm(
+      `Delete "${reminder.name}"?`
+    )
+
+    if (!confirmed) return
+
+    try {
+      setActionLoading(reminder.id)
+      setError(null)
+
+      await deleteReminder(reminder.id)
+
+      setReminders((current) =>
+        current.filter((item) => item.id !== reminder.id)
+      )
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to delete reminder'
+      )
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   return (
-    <main
-      style={{
-        maxWidth: 600,
-        margin: '0 auto',
-        padding: 40,
-        fontFamily: 'Arial, sans-serif',
-      }}
-    >
-      <h1>Universal Reminder</h1>
+    <main className="min-h-screen bg-gray-50 px-6 py-10">
+      <div className="mx-auto max-w-3xl">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">
+              Universal Reminder
+            </h1>
 
-      <p>
-        Web Push test interface
-      </p>
+            <p className="mt-1 text-sm text-gray-500">
+              Manage your reminders
+            </p>
+          </div>
 
-      <hr />
+          <button
+            onClick={openCreateForm}
+            className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            + Add Reminder
+          </button>
+        </div>
 
-      <h2>iPhone Push</h2>
+        {error && (
+          <div className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
 
-      <p>
-        Status:{' '}
-        <strong>
-          {status.subscribed
-            ? 'Registered'
-            : 'Not registered'}
-        </strong>
-      </p>
+        {showForm && (
+          <form
+            onSubmit={handleSubmit}
+            className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+          >
+            <h2 className="text-xl font-semibold text-gray-900">
+              {editingReminder
+                ? 'Edit Reminder'
+                : 'New Reminder'}
+            </h2>
 
-      <p>{message}</p>
+            <div className="mt-5 space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Name
+                </label>
 
-      <div
-        style={{
-          display: 'flex',
-          gap: 12,
-          flexWrap: 'wrap',
-          marginTop: 20,
-        }}
-      >
-        <button
-          onClick={handleRegisterPush}
-          disabled={loading || status.subscribed}
-          style={{
-            padding: '10px 16px',
-            cursor: loading || status.subscribed
-              ? 'default'
-              : 'pointer',
-          }}
-        >
-          Enable iPhone Notifications
-        </button>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(event) =>
+                    setFormData({
+                      ...formData,
+                      name: event.target.value,
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-black"
+                  placeholder="Eye Exercise"
+                />
+              </div>
 
-        <button
-          onClick={handleTestNotification}
-          disabled={loading || !status.subscribed}
-          style={{
-            padding: '10px 16px',
-            cursor: loading || !status.subscribed
-              ? 'default'
-              : 'pointer',
-          }}
-        >
-          Test Notification
-        </button>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Start
+                  </label>
+
+                  <input
+                    type="time"
+                    value={formData.startTime}
+                    onChange={(event) =>
+                      setFormData({
+                        ...formData,
+                        startTime: event.target.value,
+                      })
+                    }
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    End
+                  </label>
+
+                  <input
+                    type="time"
+                    value={formData.endTime}
+                    onChange={(event) =>
+                      setFormData({
+                        ...formData,
+                        endTime: event.target.value,
+                      })
+                    }
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Interval (minutes)
+                </label>
+
+                <input
+                  type="number"
+                  min="1"
+                  value={formData.interval}
+                  onChange={(event) =>
+                    setFormData({
+                      ...formData,
+                      interval: event.target.value,
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-2">
+              <button
+                type="submit"
+                className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+              >
+                {editingReminder ? 'Save' : 'Create'}
+              </button>
+
+              <button
+                type="button"
+                onClick={closeForm}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        <div className="mt-8 space-y-4">
+          {loading ? (
+            <p className="text-sm text-gray-500">
+              Loading reminders...
+            </p>
+          ) : reminders.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-white p-10 text-center">
+              <p className="text-gray-500">
+                No reminders yet.
+              </p>
+
+              <button
+                onClick={openCreateForm}
+                className="mt-3 text-sm font-medium text-black underline"
+              >
+                Create your first reminder
+              </button>
+            </div>
+          ) : (
+            reminders.map((reminder) => (
+              <ReminderCard
+                key={reminder.id}
+                reminder={reminder}
+                onEdit={openEditForm}
+                onDelete={handleDelete}
+                onToggle={handleToggle}
+                loading={actionLoading === reminder.id}
+              />
+            ))
+          )}
+        </div>
       </div>
     </main>
   )
