@@ -75,12 +75,17 @@ export function validateReminderInput(
     return { errors }
   }
 
+  const name = body.name as string
+  const startTime = body.startTime as string
+  const endTime = body.endTime as string
+  const interval = body.interval as number
+
   return {
     data: {
-      name: body.name.trim(),
-      startTime: body.startTime,
-      endTime: body.endTime,
-      interval: body.interval,
+      name: name.trim(),
+      startTime,
+      endTime,
+      interval,
     },
   }
 }
