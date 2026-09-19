@@ -240,17 +240,17 @@ export default function Home() {
           </div>
 
           <div className="flex gap-2">
-            {pushStatus !== 'enabled' && (
-              <button
-                onClick={handleEnablePush}
-                disabled={pushLoading}
-                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
-              >
-                {pushLoading
-                  ? 'Enabling...'
+            <button
+              onClick={handleEnablePush}
+              disabled={pushLoading}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+            >
+              {pushLoading
+                ? 'Enabling...'
+                : pushStatus === 'enabled'
+                  ? '🔔 Notifications Enabled'
                   : '🔔 Enable iPhone Notifications'}
-              </button>
-            )}
+            </button>
 
             <button
               onClick={openCreateForm}
