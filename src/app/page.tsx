@@ -12,7 +12,7 @@ import {
 } from '@/lib/api/reminders'
 import { Reminder } from '@/types/reminder'
 import {
-  requestPushPermission,
+  registerPush,
   getPushStatus,
 } from '@/lib/pushClient'
 
