@@ -103,7 +103,7 @@ export default function Home() {
       setPushLoading(true)
       setError(null)
 
-      await requestPushPermission()
+      await registerPush()
 
       setPushStatus('enabled')
     } catch (error) {
