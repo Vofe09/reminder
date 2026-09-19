@@ -11,6 +11,10 @@ import {
   updateReminder,
 } from '@/lib/api/reminders'
 import { Reminder } from '@/types/reminder'
+import {
+  requestPushPermission,
+  getPushStatus,
+} from '@/lib/pushClient'
 
 type FormData = {
   name: string
@@ -36,6 +40,12 @@ export default function Home() {
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null)
   const [formData, setFormData] = useState<FormData>(emptyForm)
 
+  const [pushStatus, setPushStatus] = useState<
+    'unknown' | 'enabled' | 'disabled'
+  >('unknown')
+
+  const [pushLoading, setPushLoading] = useState(false)
+
   async function loadReminders() {
     try {
       setError(null)
@@ -54,8 +64,15 @@ export default function Home() {
 
   useEffect(() => {
     loadReminders()
-  }, [])
 
+    getPushStatus()
+      .then((enabled) => {
+        setPushStatus(enabled ? 'enabled' : 'disabled')
+      })
+      .catch(() => {
+        setPushStatus('disabled')
+      })
+  }, [])
   function openCreateForm() {
     setEditingReminder(null)
     setFormData(emptyForm)
@@ -79,6 +96,25 @@ export default function Home() {
     setShowForm(false)
     setEditingReminder(null)
     setFormData(emptyForm)
+  }
+
+  async function handleEnablePush() {
+    try {
+      setPushLoading(true)
+      setError(null)
+
+      await requestPushPermission()
+
+      setPushStatus('enabled')
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to enable notifications'
+      )
+    } finally {
+      setPushLoading(false)
+    }
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -192,7 +228,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-10">
       <div className="mx-auto max-w-3xl">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">
               Universal Reminder
@@ -203,12 +239,26 @@ export default function Home() {
             </p>
           </div>
 
-          <button
-            onClick={openCreateForm}
-            className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-          >
-            + Add Reminder
-          </button>
+          <div className="flex gap-2">
+            {pushStatus !== 'enabled' && (
+              <button
+                onClick={handleEnablePush}
+                disabled={pushLoading}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+              >
+                {pushLoading
+                  ? 'Enabling...'
+                  : '🔔 Enable iPhone Notifications'}
+              </button>
+            )}
+
+            <button
+              onClick={openCreateForm}
+              className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+            >
+              + Add Reminder
+            </button>
+          </div>
         </div>
 
         {error && (
